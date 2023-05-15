@@ -25,6 +25,7 @@ namespace VRGardenAlpha
 
             builder.Services.AddDbContext<GardenContext>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Main")));
 
+            builder.Services.AddHttpClient();
             builder.Services.AddMemoryCache();
             builder.Services.AddMeilisearch();
             builder.Services.AddAutoMapper(typeof(VRClassMap));
