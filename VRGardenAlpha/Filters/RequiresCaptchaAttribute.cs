@@ -17,12 +17,12 @@ namespace VRGardenAlpha.Filters
             string? claim = ctx.HttpContext.Request.Headers["X-Captcha"];
             // Later, implement a thing that ignores captcha requirement for System bots and etc.
 
-            if (masterPwClaim == options.Value.MasterPassword)
+            if (!options.Value.RequiresCaptcha || masterPwClaim == options.Value.MasterPassword)
             {
                 await next();
                 return;
             }
-            
+
             if (!string.IsNullOrWhiteSpace(claim))
             {
                 if (await captcha.VerifyCaptchaAsync(claim, ctx.HttpContext))

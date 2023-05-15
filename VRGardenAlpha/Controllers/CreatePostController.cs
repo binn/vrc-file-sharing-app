@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
+using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using VRGardenAlpha.Data;
@@ -80,18 +81,18 @@ namespace VRGardenAlpha.Controllers
 
             await _ctx.Posts.AddAsync(post);
             await _ctx.SaveChangesAsync();
-            
-            return Ok(post);
+
+            return Ok(_mapper.Map<PostModel>(post));
         }
 
         [HttpPost("{id}/image")]
-        public async Task<IActionResult> UploadImageAsync(int id, [FromForm] [Required(ErrorMessage = "image.required")] IFormFile image)
+        public async Task<IActionResult> UploadImageAsync(int id, [FromForm][Required(ErrorMessage = "image.required")] IFormFile image)
         {
             if (!ModelState.IsValid)
                 return ValidationProblem(ModelState);
 
             double length = (image.Length) / (1024.0 * 1024.0);
-            if(length > 5.0) // Max 5MB image limit
+            if (length > 5.0) // Max 5MB image limit
                 return BadRequest(new { error = "image.size" });
 
             var post = await _ctx.Posts.FindAsync(id);
@@ -101,14 +102,17 @@ namespace VRGardenAlpha.Controllers
             if (post.ACL != ACL.Incomplete)
                 return BadRequest(new { error = "post.complete" });
 
+            if (post.ImageContentLength > 0)
+                return BadRequest(new { error = "image.complete" });
+
             if (!_allowedImageTypes.Contains(image.ContentType))
                 return BadRequest(new { error = "contentType.invalid" });
 
-            using var @is = await Image.LoadAsync(image.OpenReadStream());           
+            using var @is = await Image.LoadAsync(image.OpenReadStream());
             string ext = image.ContentType == "image/gif" ? ".gif" : ".jpg";
             string path = Path.Combine(_options.MountPath!, post.Id.ToString() + "_image" + ext);
 
-            using (var fs = new FileStream(path, FileMode.Append))
+            using (var fs = new FileStream(path, FileMode.OpenOrCreate))
             {
                 if (image.ContentType == "image/gif")
                     await @is.SaveAsGifAsync(fs);
@@ -120,6 +124,7 @@ namespace VRGardenAlpha.Controllers
             post.ImageContentType = image.ContentType;
             post.ImageContentLength = fi.Length;
 
+            await _ctx.SaveChangesAsync();
             return NoContent();
         }
 
@@ -138,7 +143,7 @@ namespace VRGardenAlpha.Controllers
             if (post.ACL != ACL.Incomplete)
                 return BadRequest(new { error = "post.complete" });
 
-            if(post.ImageContentLength < 0)
+            if (post.ImageContentLength < 0)
                 return BadRequest(new { error = "image.required" });
 
             if (request.Chunk > (post.LastChunk + 1) || request.Chunk <= post.LastChunk)
@@ -166,7 +171,8 @@ namespace VRGardenAlpha.Controllers
             if (length > 3.2) // 3GB max limit.
                 return BadRequest(new { error = "file.size" });
 
-            string path = Path.Combine(_options.MountPath!, post.Id.ToString() + Path.GetExtension(post.FileName));
+            string ext = post.ContentType == "application/gzip" ? ".unitypackage" : ".zip";
+            string path = Path.Combine(_options.MountPath!, post.Id.ToString() + ext);
             using (var fs = new FileStream(path, FileMode.Append))
             using (var data = request.Data.OpenReadStream())
             {
@@ -179,22 +185,25 @@ namespace VRGardenAlpha.Controllers
 
             if (post.Chunks == post.LastChunk)
             {
+                if (!VerifyFileType(post, path))
+                    return BadRequest(new { error = "validation.failure" });
+
                 var hash = await SHA1.HashDataAsync(new FileStream(path, FileMode.Open));
                 post.Checksum = Convert.ToHexString(hash);
                 post.ACL = ACL.Public;
-                
+
                 var index = _client.Index("vrcg-posts");
                 var sp = _mapper.Map<SearchablePost>(post);
                 sp.Thumbnail = Request.Headers["X-Forwarded-Proto"]
                     + "://" + Request.Headers.Host + "/@storage/"
                     + post.Id.ToString() + "_image"
                     + post.ImageContentType == "image/gif" ? ".gif" : ".jpg";
-                
+
                 await index.AddDocumentsAsync(new SearchablePost[] { sp });
             }
-            
+
             await _ctx.SaveChangesAsync();
-            
+
             return Ok(new
             {
                 length = post.ContentLink,
@@ -202,6 +211,40 @@ namespace VRGardenAlpha.Controllers
                 remaining = post.Chunks,
                 completed = post.Chunks == post.LastChunk
             });
+        }
+
+        [NonAction]
+        private bool VerifyFileType(Post post, string path)
+        {
+            if (post.ContentType == "application/gzip")
+                return VerifyUnityPackageBase(path);
+            else
+                return VerifyZip(path);
+        }
+
+        [NonAction]
+        private bool VerifyUnityPackageBase(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open);
+            var first = fs.ReadByte();
+            var second = fs.ReadByte();
+
+            return first == 0x1F && second == 0x8B;
+        }
+
+        [NonAction]
+        private bool VerifyZip(string path)
+        {
+            try
+            {
+                ZipArchive archive = ZipFile.OpenRead(path);
+                archive.Dispose();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

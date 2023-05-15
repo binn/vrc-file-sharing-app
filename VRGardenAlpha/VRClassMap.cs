@@ -1,4 +1,6 @@
 ﻿using AutoMapper;
+using VRGardenAlpha.Data;
+using VRGardenAlpha.Models;
 
 namespace VRGardenAlpha
 {
@@ -6,7 +8,8 @@ namespace VRGardenAlpha
     {
         public VRClassMap()
         {
-            
+            CreateMap<Post, PostModel>();   
+            CreateMap<Post, SearchablePost>(); 
         }
     }
 }
