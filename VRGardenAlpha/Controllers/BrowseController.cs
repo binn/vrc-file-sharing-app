@@ -52,7 +52,7 @@ namespace VRGardenAlpha.Controllers
             else return NoContent(); // This is here to prevent any transactions from being processed.
 
             await _ctx.SaveChangesAsync();
-            await index.UpdateDocumentsAsync(new PostModel[] { _mapper.Map<PostModel>(post) });
+            await index.UpdateDocumentsAsync(new SearchablePost[] { _mapper.Map<SearchablePost>(post) });
             // fuck you meilisearch for not implementing single document operations
 
             return NoContent();

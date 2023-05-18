@@ -192,12 +192,15 @@ namespace VRGardenAlpha.Controllers
                 post.Checksum = Convert.ToHexString(hash);
                 post.ACL = ACL.Public;
 
+                string proto = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? 
+                    (Request.IsHttps ? "https" : "http");
+
                 var index = _client.Index("vrcg-posts");
                 var sp = _mapper.Map<SearchablePost>(post);
-                sp.Thumbnail = Request.Headers["X-Forwarded-Proto"]
-                    + "://" + Request.Headers.Host + "/@storage/"
+                sp.Thumbnail = proto + "://"
+                    + Request.Headers.Host + "/@storage/"
                     + post.Id.ToString() + "_image"
-                    + post.ImageContentType == "image/gif" ? ".gif" : ".jpg";
+                    + (post.ImageContentType == "image/gif" ? ".gif" : ".jpg");
 
                 await index.AddDocumentsAsync(new SearchablePost[] { sp });
             }
@@ -206,9 +209,9 @@ namespace VRGardenAlpha.Controllers
 
             return Ok(new
             {
-                length = post.ContentLink,
+                length = post.ContentLength,
                 chunk = post.LastChunk,
-                remaining = post.Chunks,
+                remaining = post.Chunks - request.Chunk,
                 completed = post.Chunks == post.LastChunk
             });
         }
